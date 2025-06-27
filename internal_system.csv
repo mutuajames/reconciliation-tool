@@ -1,0 +1,5 @@
+transaction_reference,amount,status,date
+TXN001,100.00,completed,2025-06-25
+TXN002,250.00,pending,2025-06-25
+TXN003,300.00,completed,2025-06-25
+TXN004,150.00,failed,2025-06-25
