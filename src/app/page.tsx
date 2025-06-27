@@ -14,7 +14,7 @@ import {
 	Building2,
 	RefreshCw
 } from 'lucide-react';
-import Papa from 'papaparse';
+import Papa, { ParseError, ParseResult } from 'papaparse';
 
 // Type definitions
 interface Transaction {
@@ -24,7 +24,7 @@ interface Transaction {
 	date: string;
 	counterparty?: string;
 	currency?: string;
-	[key: string]: any;
+	[key: string]: string | number | undefined;
 }
 
 interface ReconciliationResult {
@@ -61,14 +61,14 @@ const ReconciliationTool: React.FC = () => {
 		}
 
 		setError(null);
-
 		Papa.parse(file, {
 			header: true,
 			skipEmptyLines: true,
 			dynamicTyping: true,
-			complete: (results: { errors: string | any[]; data: Transaction[]; }) => {
+			complete: (results: ParseResult<Transaction>) => {
 				if (results.errors.length > 0) {
-					setError(`Error parsing ${fileType} file: ${results.errors[0].message}`);
+					const firstError: ParseError = results.errors[0];
+					setError(`Error parsing ${fileType} file: ${firstError.message}`);
 					return;
 				}
 
@@ -103,7 +103,7 @@ const ReconciliationTool: React.FC = () => {
 					setProviderFile(uploadedFile);
 				}
 			},
-			error: (error: { message: any; }) => {
+			error: (error: { message: string; }) => {
 				setError(`Error reading ${fileType} file: ${error.message}`);
 			}
 		});
@@ -243,7 +243,7 @@ const ReconciliationTool: React.FC = () => {
 							<div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
 								<Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
 								<p className="text-sm text-gray-600 mb-3">
-									Upload your platform's transaction export
+									Upload your platform&apos;s transaction export
 								</p>
 								<input
 									type="file"
