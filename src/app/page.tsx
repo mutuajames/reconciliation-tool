@@ -16,6 +16,7 @@ import {
 	ChevronLeft,
 	ChevronRight
 } from 'lucide-react';
+import Papa, { ParseError, ParseResult } from 'papaparse';
 
 // PapaParse will be loaded via a script tag, so no import needed here.
 // Type definitions
@@ -47,157 +48,156 @@ interface UploadedFile {
 }
 
 interface PaginationState {
-  matched: number;
-  mismatched: number;
-  internalOnly: number;
-  providerOnly: number;
+	matched: number;
+	mismatched: number;
+	internalOnly: number;
+	providerOnly: number;
 }
 
-// Declare Papa and ParseResult types globally if not importing directly
 declare global {
-    interface Window {
-        Papa: any; // PapaParse library
-    }
+	interface Window {
+		Papa: typeof Papa;
+	}
 }
 
 
 const ReconciliationTool: React.FC = () => {
-    const [internalFile, setInternalFile] = useState<UploadedFile | null>(null);
-    const [providerFile, setProviderFile] = useState<UploadedFile | null>(null);
-    const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
-    const [isProcessing, setIsProcessing] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [isPapaLoaded, setIsPapaLoaded] = useState(false); // New state to track PapaParse loading
+	const [internalFile, setInternalFile] = useState<UploadedFile | null>(null);
+	const [providerFile, setProviderFile] = useState<UploadedFile | null>(null);
+	const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
+	const [isProcessing, setIsProcessing] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [isPapaLoaded, setIsPapaLoaded] = useState(false); // New state to track PapaParse loading
 
-    // Added state variables for pagination
-    const [currentPage, setCurrentPage] = useState<PaginationState>({
-        matched: 1,
-        mismatched: 1,
-        internalOnly: 1,
-        providerOnly: 1
-    });
+	// Added state variables for pagination
+	const [currentPage, setCurrentPage] = useState<PaginationState>({
+		matched: 1,
+		mismatched: 1,
+		internalOnly: 1,
+		providerOnly: 1
+	});
 
-    const itemsPerPage = 10;
+	const itemsPerPage = 10;
 
-    // Load PapaParse script dynamically
-    useEffect(() => {
-        const scriptId = 'papaparse-script';
-        if (!document.getElementById(scriptId)) {
-            const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js';
-            script.id = scriptId;
-            script.onload = () => setIsPapaLoaded(true);
-            script.onerror = () => setError('Failed to load PapaParse library. Please check your internet connection.');
-            document.head.appendChild(script);
-        } else if (window.Papa) {
-            setIsPapaLoaded(true);
-        }
-    }, []);
+	// Load PapaParse script dynamically
+	useEffect(() => {
+		const scriptId = 'papaparse-script';
+		if (!document.getElementById(scriptId)) {
+			const script = document.createElement('script');
+			script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js';
+			script.id = scriptId;
+			script.onload = () => setIsPapaLoaded(true);
+			script.onerror = () => setError('Failed to load PapaParse library. Please check your internet connection.');
+			document.head.appendChild(script);
+		} else if (window.Papa) {
+			setIsPapaLoaded(true);
+		}
+	}, []);
 
-    // Helper function for paginated data
-    const getPaginatedData = <T,>(data: T[], page: number, itemsPerPage: number = 10) => {
-        const startIndex = (page - 1) * itemsPerPage;
-        const endIndex = startIndex + itemsPerPage;
-        return {
-            data: data.slice(startIndex, endIndex),
-            totalPages: Math.ceil(data.length / itemsPerPage),
-            currentPage: page,
-            totalItems: data.length,
-            startIndex: startIndex + 1,
-            endIndex: Math.min(endIndex, data.length)
-        };
-    };
+	// Helper function for paginated data
+	const getPaginatedData = <T,>(data: T[], page: number, itemsPerPage: number = 10) => {
+		const startIndex = (page - 1) * itemsPerPage;
+		const endIndex = startIndex + itemsPerPage;
+		return {
+			data: data.slice(startIndex, endIndex),
+			totalPages: Math.ceil(data.length / itemsPerPage),
+			currentPage: page,
+			totalItems: data.length,
+			startIndex: startIndex + 1,
+			endIndex: Math.min(endIndex, data.length)
+		};
+	};
 
-    // PaginationControls component
-    const PaginationControls: React.FC<{
-        currentPage: number;
-        totalPages: number;
-        onPageChange: (page: number) => void;
-        totalItems: number;
-        startIndex: number;
-        endIndex: number;
-    }> = ({ currentPage, totalPages, onPageChange, totalItems, startIndex, endIndex }) => {
-        if (totalPages <= 1) return null;
+	// PaginationControls component
+	const PaginationControls: React.FC<{
+		currentPage: number;
+		totalPages: number;
+		onPageChange: (page: number) => void;
+		totalItems: number;
+		startIndex: number;
+		endIndex: number;
+	}> = ({ currentPage, totalPages, onPageChange, totalItems, startIndex, endIndex }) => {
+		if (totalPages <= 1) return null;
 
-        return (
-            <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 rounded-b-lg">
-                <div className="flex items-center text-sm text-gray-700">
-                    <span>
-                        Showing {startIndex} to {endIndex} of {totalItems} results
-                    </span>
-                </div>
-                <div className="flex items-center space-x-2">
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onPageChange(currentPage - 1)}
-                        disabled={currentPage === 1}
-                        className="flex items-center rounded-lg"
-                    >
-                        <ChevronLeft className="h-4 w-4 mr-1" />
-                        Previous
-                    </Button>
+		return (
+			<div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 rounded-b-lg">
+				<div className="flex items-center text-sm text-gray-700">
+					<span>
+						Showing {startIndex} to {endIndex} of {totalItems} results
+					</span>
+				</div>
+				<div className="flex items-center space-x-2">
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => onPageChange(currentPage - 1)}
+						disabled={currentPage === 1}
+						className="flex items-center rounded-lg"
+					>
+						<ChevronLeft className="h-4 w-4 mr-1" />
+						Previous
+					</Button>
 
-                    <div className="flex items-center space-x-1">
-                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                            let pageNum;
-                            if (totalPages <= 5) {
-                                pageNum = i + 1;
-                            } else if (currentPage <= 3) {
-                                pageNum = i + 1;
-                            } else if (currentPage >= totalPages - 2) {
-                                pageNum = totalPages - 4 + i;
-                            } else {
-                                pageNum = currentPage - 2 + i;
-                            }
+					<div className="flex items-center space-x-1">
+						{Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+							let pageNum;
+							if (totalPages <= 5) {
+								pageNum = i + 1;
+							} else if (currentPage <= 3) {
+								pageNum = i + 1;
+							} else if (currentPage >= totalPages - 2) {
+								pageNum = totalPages - 4 + i;
+							} else {
+								pageNum = currentPage - 2 + i;
+							}
 
-                            return (
-                                <Button
-                                    key={pageNum}
-                                    variant={currentPage === pageNum ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => onPageChange(pageNum)}
-                                    className="w-8 h-8 p-0 rounded-lg"
-                                >
-                                    {pageNum}
-                                </Button>
-                            );
-                        })}
-                    </div>
+							return (
+								<Button
+									key={pageNum}
+									variant={currentPage === pageNum ? "default" : "outline"}
+									size="sm"
+									onClick={() => onPageChange(pageNum)}
+									className="w-8 h-8 p-0 rounded-lg"
+								>
+									{pageNum}
+								</Button>
+							);
+						})}
+					</div>
 
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onPageChange(currentPage + 1)}
-                        disabled={currentPage === totalPages}
-                        className="flex items-center rounded-lg"
-                    >
-                        Next
-                        <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                </div>
-            </div>
-        );
-    };
+					<Button
+						variant="outline"
+						size="sm"
+						onClick={() => onPageChange(currentPage + 1)}
+						disabled={currentPage === totalPages}
+						className="flex items-center rounded-lg"
+					>
+						Next
+						<ChevronRight className="h-4 w-4 ml-1" />
+					</Button>
+				</div>
+			</div>
+		);
+	};
 
-    // Function to reset pagination when new reconciliation is performed
-    const resetPagination = () => {
-        setCurrentPage({
-            matched: 1,
-            mismatched: 1,
-            internalOnly: 1,
-            providerOnly: 1
-        });
-    };
+	// Function to reset pagination when new reconciliation is performed
+	const resetPagination = () => {
+		setCurrentPage({
+			matched: 1,
+			mismatched: 1,
+			internalOnly: 1,
+			providerOnly: 1
+		});
+	};
 
 	const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>, fileType: 'internal' | 'provider') => {
 		const file = event.target.files?.[0];
 		if (!file) return;
 
-        if (!isPapaLoaded) {
-            setError('PapaParse library is not loaded yet. Please wait a moment and try again.');
-            return;
-        }
+		if (!isPapaLoaded) {
+			setError('PapaParse library is not loaded yet. Please wait a moment and try again.');
+			return;
+		}
 
 		if (!file.name.toLowerCase().endsWith('.csv')) {
 			setError('Please upload CSV files only');
@@ -209,9 +209,9 @@ const ReconciliationTool: React.FC = () => {
 			header: true,
 			skipEmptyLines: true,
 			dynamicTyping: true,
-			complete: (results: any) => { // Use any for results
+			complete: (results: ParseResult<Transaction>) => {
 				if (results.errors.length > 0) {
-					const firstError = results.errors[0]; // Accessing ParseError properties
+					const firstError: ParseError = results.errors[0];
 					setError(`Error parsing ${fileType} file: ${firstError.message}`);
 					return;
 				}
@@ -258,7 +258,7 @@ const ReconciliationTool: React.FC = () => {
 	};
 
 	const performReconciliation = () => {
-        resetPagination();
+		resetPagination();
 
 		if (!internalFile || !providerFile) {
 			setError('Please upload both files before reconciling');
@@ -306,9 +306,9 @@ const ReconciliationTool: React.FC = () => {
 						differences.push(`Status: ${internalTxn.status} vs ${providerTxn.status}`);
 					}
 
-                    if (internalTxn.date !== providerTxn.date) {
-                        differences.push(`Date: ${internalTxn.date} vs ${providerTxn.date}`);
-                    }
+					if (internalTxn.date !== providerTxn.date) {
+						differences.push(`Date: ${internalTxn.date} vs ${providerTxn.date}`);
+					}
 
 
 					if (differences.length > 0) {
@@ -338,11 +338,11 @@ const ReconciliationTool: React.FC = () => {
 		}, 1500);
 	};
 
-	const exportToCsv = (data: any[], filename: string) => {
-        if (!isPapaLoaded) {
-            setError('PapaParse library is not loaded yet. Cannot export CSV.');
-            return;
-        }
+	const exportToCsv = (data: Record<string, unknown>[], filename: string) => {
+		if (!isPapaLoaded) {
+			setError('PapaParse library is not loaded yet. Cannot export CSV.');
+			return;
+		}
 		const csv = window.Papa.unparse(data); // Use window.Papa
 		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 		const link = document.createElement('a');
@@ -407,13 +407,12 @@ const ReconciliationTool: React.FC = () => {
 									accept=".csv"
 									onChange={(e) => handleFileUpload(e, 'internal')}
 									className="hidden"
-                                    disabled={!isPapaLoaded} // Disable if PapaParse not loaded
+									disabled={!isPapaLoaded} // Disable if PapaParse not loaded
 								/>
 								<label
 									htmlFor="internal-upload"
-									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${
-                                        isPapaLoaded ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'
-                                    }`}
+									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${isPapaLoaded ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'
+										}`}
 								>
 									Choose CSV File
 								</label>
@@ -451,13 +450,12 @@ const ReconciliationTool: React.FC = () => {
 									accept=".csv"
 									onChange={(e) => handleFileUpload(e, 'provider')}
 									className="hidden"
-                                    disabled={!isPapaLoaded} // Disable if PapaParse not loaded
+									disabled={!isPapaLoaded} // Disable if PapaParse not loaded
 								/>
 								<label
 									htmlFor="provider-upload"
-									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${
-                                        isPapaLoaded ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'
-                                    }`}
+									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${isPapaLoaded ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'
+										}`}
 								>
 									Choose CSV File
 								</label>
@@ -632,9 +630,9 @@ const ReconciliationTool: React.FC = () => {
 													const flatData = reconciliationResult.mismatched.map(m => ({
 														...m.internal,
 														provider_reference: m.provider.transaction_reference,
-                                                        provider_amount: m.provider.amount,
-                                                        provider_status: m.provider.status,
-                                                        provider_date: m.provider.date,
+														provider_amount: m.provider.amount,
+														provider_status: m.provider.status,
+														provider_date: m.provider.date,
 														differences: m.differences.join('; ')
 													}));
 													exportToCsv(flatData, 'mismatched-transactions.csv');
@@ -655,13 +653,13 @@ const ReconciliationTool: React.FC = () => {
 															<h4 className="font-medium text-sm mb-2 text-gray-800">Internal System</h4>
 															<p className="text-xs font-mono text-gray-700">{mismatch.internal.transaction_reference}</p>
 															<p className="text-sm text-gray-700">{formatCurrency(mismatch.internal.amount)} • {mismatch.internal.status}</p>
-                                                            <p className="text-xs text-gray-700">{mismatch.internal.date}</p>
+															<p className="text-xs text-gray-700">{mismatch.internal.date}</p>
 														</div>
 														<div>
 															<h4 className="font-medium text-sm mb-2 text-gray-800">Provider</h4>
 															<p className="text-xs font-mono text-gray-700">{mismatch.provider.transaction_reference}</p>
 															<p className="text-sm text-gray-700">{formatCurrency(mismatch.provider.amount)} • {mismatch.provider.status}</p>
-                                                            <p className="text-xs text-gray-700">{mismatch.provider.date}</p>
+															<p className="text-xs text-gray-700">{mismatch.provider.date}</p>
 														</div>
 													</div>
 													<div className="mt-3 pt-3 border-t border-orange-200">
@@ -675,7 +673,7 @@ const ReconciliationTool: React.FC = () => {
 												</div>
 											))}
 										</div>
-                                        <PaginationControls
+										<PaginationControls
 											currentPage={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).currentPage}
 											totalPages={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).totalPages}
 											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, mismatched: page }))}
@@ -734,7 +732,7 @@ const ReconciliationTool: React.FC = () => {
 												</tbody>
 											</table>
 										</div>
-                                        <PaginationControls
+										<PaginationControls
 											currentPage={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).currentPage}
 											totalPages={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).totalPages}
 											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, internalOnly: page }))}
@@ -793,7 +791,7 @@ const ReconciliationTool: React.FC = () => {
 												</tbody>
 											</table>
 										</div>
-                                        <PaginationControls
+										<PaginationControls
 											currentPage={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).currentPage}
 											totalPages={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).totalPages}
 											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, providerOnly: page }))}
