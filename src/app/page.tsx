@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react'; // Added useEffect
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -12,10 +12,12 @@ import {
 	X,
 	FileText,
 	Building2,
-	RefreshCw
+	RefreshCw,
+	ChevronLeft,
+	ChevronRight
 } from 'lucide-react';
-import Papa, { ParseError, ParseResult } from 'papaparse';
 
+// PapaParse will be loaded via a script tag, so no import needed here.
 // Type definitions
 interface Transaction {
 	transaction_reference: string;
@@ -44,16 +46,158 @@ interface UploadedFile {
 	type: 'internal' | 'provider';
 }
 
+interface PaginationState {
+  matched: number;
+  mismatched: number;
+  internalOnly: number;
+  providerOnly: number;
+}
+
+// Declare Papa and ParseResult types globally if not importing directly
+declare global {
+    interface Window {
+        Papa: any; // PapaParse library
+    }
+}
+
+
 const ReconciliationTool: React.FC = () => {
-	const [internalFile, setInternalFile] = useState<UploadedFile | null>(null);
-	const [providerFile, setProviderFile] = useState<UploadedFile | null>(null);
-	const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
-	const [isProcessing, setIsProcessing] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+    const [internalFile, setInternalFile] = useState<UploadedFile | null>(null);
+    const [providerFile, setProviderFile] = useState<UploadedFile | null>(null);
+    const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
+    const [isProcessing, setIsProcessing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [isPapaLoaded, setIsPapaLoaded] = useState(false); // New state to track PapaParse loading
+
+    // Added state variables for pagination
+    const [currentPage, setCurrentPage] = useState<PaginationState>({
+        matched: 1,
+        mismatched: 1,
+        internalOnly: 1,
+        providerOnly: 1
+    });
+
+    const itemsPerPage = 10;
+
+    // Load PapaParse script dynamically
+    useEffect(() => {
+        const scriptId = 'papaparse-script';
+        if (!document.getElementById(scriptId)) {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js';
+            script.id = scriptId;
+            script.onload = () => setIsPapaLoaded(true);
+            script.onerror = () => setError('Failed to load PapaParse library. Please check your internet connection.');
+            document.head.appendChild(script);
+        } else if (window.Papa) {
+            setIsPapaLoaded(true);
+        }
+    }, []);
+
+    // Helper function for paginated data
+    const getPaginatedData = <T,>(data: T[], page: number, itemsPerPage: number = 10) => {
+        const startIndex = (page - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+        return {
+            data: data.slice(startIndex, endIndex),
+            totalPages: Math.ceil(data.length / itemsPerPage),
+            currentPage: page,
+            totalItems: data.length,
+            startIndex: startIndex + 1,
+            endIndex: Math.min(endIndex, data.length)
+        };
+    };
+
+    // PaginationControls component
+    const PaginationControls: React.FC<{
+        currentPage: number;
+        totalPages: number;
+        onPageChange: (page: number) => void;
+        totalItems: number;
+        startIndex: number;
+        endIndex: number;
+    }> = ({ currentPage, totalPages, onPageChange, totalItems, startIndex, endIndex }) => {
+        if (totalPages <= 1) return null;
+
+        return (
+            <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 rounded-b-lg">
+                <div className="flex items-center text-sm text-gray-700">
+                    <span>
+                        Showing {startIndex} to {endIndex} of {totalItems} results
+                    </span>
+                </div>
+                <div className="flex items-center space-x-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onPageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="flex items-center rounded-lg"
+                    >
+                        <ChevronLeft className="h-4 w-4 mr-1" />
+                        Previous
+                    </Button>
+
+                    <div className="flex items-center space-x-1">
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            let pageNum;
+                            if (totalPages <= 5) {
+                                pageNum = i + 1;
+                            } else if (currentPage <= 3) {
+                                pageNum = i + 1;
+                            } else if (currentPage >= totalPages - 2) {
+                                pageNum = totalPages - 4 + i;
+                            } else {
+                                pageNum = currentPage - 2 + i;
+                            }
+
+                            return (
+                                <Button
+                                    key={pageNum}
+                                    variant={currentPage === pageNum ? "default" : "outline"}
+                                    size="sm"
+                                    onClick={() => onPageChange(pageNum)}
+                                    className="w-8 h-8 p-0 rounded-lg"
+                                >
+                                    {pageNum}
+                                </Button>
+                            );
+                        })}
+                    </div>
+
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onPageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className="flex items-center rounded-lg"
+                    >
+                        Next
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                </div>
+            </div>
+        );
+    };
+
+    // Function to reset pagination when new reconciliation is performed
+    const resetPagination = () => {
+        setCurrentPage({
+            matched: 1,
+            mismatched: 1,
+            internalOnly: 1,
+            providerOnly: 1
+        });
+    };
 
 	const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>, fileType: 'internal' | 'provider') => {
 		const file = event.target.files?.[0];
 		if (!file) return;
+
+        if (!isPapaLoaded) {
+            setError('PapaParse library is not loaded yet. Please wait a moment and try again.');
+            return;
+        }
 
 		if (!file.name.toLowerCase().endsWith('.csv')) {
 			setError('Please upload CSV files only');
@@ -61,13 +205,13 @@ const ReconciliationTool: React.FC = () => {
 		}
 
 		setError(null);
-		Papa.parse(file, {
+		window.Papa.parse(file, { // Use window.Papa
 			header: true,
 			skipEmptyLines: true,
 			dynamicTyping: true,
-			complete: (results: ParseResult<Transaction>) => {
+			complete: (results: any) => { // Use any for results
 				if (results.errors.length > 0) {
-					const firstError: ParseError = results.errors[0];
+					const firstError = results.errors[0]; // Accessing ParseError properties
 					setError(`Error parsing ${fileType} file: ${firstError.message}`);
 					return;
 				}
@@ -83,11 +227,12 @@ const ReconciliationTool: React.FC = () => {
 				const hasRequiredFields = data.every(row =>
 					row.transaction_reference &&
 					row.amount !== undefined &&
-					row.status
+					row.status &&
+					row.date
 				);
 
 				if (!hasRequiredFields) {
-					setError(`${fileType} file missing required fields: transaction_reference, amount, status`);
+					setError(`${fileType} file missing required fields: transaction_reference, amount, status, date`);
 					return;
 				}
 
@@ -103,7 +248,7 @@ const ReconciliationTool: React.FC = () => {
 					setProviderFile(uploadedFile);
 				}
 			},
-			error: (error: { message: string; }) => {
+			error: (error: { message: string; }) => { // Error object type from PapaParse
 				setError(`Error reading ${fileType} file: ${error.message}`);
 			}
 		});
@@ -113,6 +258,8 @@ const ReconciliationTool: React.FC = () => {
 	};
 
 	const performReconciliation = () => {
+        resetPagination();
+
 		if (!internalFile || !providerFile) {
 			setError('Please upload both files before reconciling');
 			return;
@@ -152,12 +299,17 @@ const ReconciliationTool: React.FC = () => {
 					const differences: string[] = [];
 
 					if (Math.abs(Number(internalTxn.amount) - Number(providerTxn.amount)) > 0.01) {
-						differences.push(`Amount: ${internalTxn.amount} vs ${providerTxn.amount}`);
+						differences.push(`Amount: ${formatCurrency(internalTxn.amount)} vs ${formatCurrency(providerTxn.amount)}`);
 					}
 
 					if (internalTxn.status !== providerTxn.status) {
 						differences.push(`Status: ${internalTxn.status} vs ${providerTxn.status}`);
 					}
+
+                    if (internalTxn.date !== providerTxn.date) {
+                        differences.push(`Date: ${internalTxn.date} vs ${providerTxn.date}`);
+                    }
+
 
 					if (differences.length > 0) {
 						result.mismatched.push({
@@ -186,8 +338,12 @@ const ReconciliationTool: React.FC = () => {
 		}, 1500);
 	};
 
-	const exportToCsv = (data: Transaction[], filename: string) => {
-		const csv = Papa.unparse(data);
+	const exportToCsv = (data: any[], filename: string) => {
+        if (!isPapaLoaded) {
+            setError('PapaParse library is not loaded yet. Cannot export CSV.');
+            return;
+        }
+		const csv = window.Papa.unparse(data); // Use window.Papa
 		const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
 		const link = document.createElement('a');
 		link.href = URL.createObjectURL(blob);
@@ -204,7 +360,7 @@ const ReconciliationTool: React.FC = () => {
 	};
 
 	return (
-		<div className="min-h-screen bg-gray-50">
+		<div className="min-h-screen bg-gray-50 font-sans">
 			{/* Header */}
 			<header className="bg-white shadow-sm border-b">
 				<div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -222,7 +378,7 @@ const ReconciliationTool: React.FC = () => {
 
 			<main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 				{error && (
-					<Alert className="mb-6 border-red-200 bg-red-50">
+					<Alert className="mb-6 border-red-200 bg-red-50 rounded-lg">
 						<AlertTriangle className="h-4 w-4 text-red-600" />
 						<AlertDescription className="text-red-800">
 							{error}
@@ -232,7 +388,7 @@ const ReconciliationTool: React.FC = () => {
 
 				{/* File Upload Section */}
 				<div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-					<Card>
+					<Card className="rounded-lg shadow-sm">
 						<CardHeader>
 							<CardTitle className="flex items-center space-x-2">
 								<FileText className="h-5 w-5 text-blue-600" />
@@ -251,10 +407,13 @@ const ReconciliationTool: React.FC = () => {
 									accept=".csv"
 									onChange={(e) => handleFileUpload(e, 'internal')}
 									className="hidden"
+                                    disabled={!isPapaLoaded} // Disable if PapaParse not loaded
 								/>
 								<label
 									htmlFor="internal-upload"
-									className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700"
+									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${
+                                        isPapaLoaded ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-400 cursor-not-allowed'
+                                    }`}
 								>
 									Choose CSV File
 								</label>
@@ -273,7 +432,7 @@ const ReconciliationTool: React.FC = () => {
 						</CardContent>
 					</Card>
 
-					<Card>
+					<Card className="rounded-lg shadow-sm">
 						<CardHeader>
 							<CardTitle className="flex items-center space-x-2">
 								<FileText className="h-5 w-5 text-green-600" />
@@ -292,10 +451,13 @@ const ReconciliationTool: React.FC = () => {
 									accept=".csv"
 									onChange={(e) => handleFileUpload(e, 'provider')}
 									className="hidden"
+                                    disabled={!isPapaLoaded} // Disable if PapaParse not loaded
 								/>
 								<label
 									htmlFor="provider-upload"
-									className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-lg cursor-pointer hover:bg-green-700"
+									className={`inline-flex items-center px-4 py-2 text-white rounded-lg cursor-pointer transition-colors ${
+                                        isPapaLoaded ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-400 cursor-not-allowed'
+                                    }`}
 								>
 									Choose CSV File
 								</label>
@@ -319,8 +481,8 @@ const ReconciliationTool: React.FC = () => {
 				<div className="text-center mb-8">
 					<Button
 						onClick={performReconciliation}
-						disabled={!internalFile || !providerFile || isProcessing}
-						className="px-8 py-3 text-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+						disabled={!internalFile || !providerFile || isProcessing || !isPapaLoaded} // Disable if PapaParse not loaded
+						className="px-8 py-3 text-lg bg-purple-600 hover:bg-purple-700 disabled:opacity-50 transition-colors rounded-lg"
 					>
 						{isProcessing ? (
 							<>
@@ -338,7 +500,7 @@ const ReconciliationTool: React.FC = () => {
 					<div className="space-y-6">
 						{/* Summary Cards */}
 						<div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-							<Card className="border-green-200 bg-green-50">
+							<Card className="border-green-200 bg-green-50 rounded-lg shadow-sm">
 								<CardContent className="flex items-center space-x-3 py-4">
 									<Check className="h-8 w-8 text-green-600" />
 									<div>
@@ -350,7 +512,7 @@ const ReconciliationTool: React.FC = () => {
 								</CardContent>
 							</Card>
 
-							<Card className="border-orange-200 bg-orange-50">
+							<Card className="border-orange-200 bg-orange-50 rounded-lg shadow-sm">
 								<CardContent className="flex items-center space-x-3 py-4">
 									<AlertTriangle className="h-8 w-8 text-orange-600" />
 									<div>
@@ -362,7 +524,7 @@ const ReconciliationTool: React.FC = () => {
 								</CardContent>
 							</Card>
 
-							<Card className="border-yellow-200 bg-yellow-50">
+							<Card className="border-yellow-200 bg-yellow-50 rounded-lg shadow-sm">
 								<CardContent className="flex items-center space-x-3 py-4">
 									<AlertTriangle className="h-8 w-8 text-yellow-600" />
 									<div>
@@ -374,7 +536,7 @@ const ReconciliationTool: React.FC = () => {
 								</CardContent>
 							</Card>
 
-							<Card className="border-red-200 bg-red-50">
+							<Card className="border-red-200 bg-red-50 rounded-lg shadow-sm">
 								<CardContent className="flex items-center space-x-3 py-4">
 									<X className="h-8 w-8 text-red-600" />
 									<div>
@@ -390,8 +552,8 @@ const ReconciliationTool: React.FC = () => {
 						{/* Detailed Results */}
 						<div className="grid grid-cols-1 gap-6">
 							{/* Matched Transactions */}
-							<Card>
-								<CardHeader className="bg-green-50">
+							<Card className="rounded-lg shadow-sm">
+								<CardHeader className="bg-green-50 rounded-t-lg">
 									<div className="flex justify-between items-center">
 										<CardTitle className="flex items-center space-x-2 text-green-800">
 											<Check className="h-5 w-5" />
@@ -402,7 +564,7 @@ const ReconciliationTool: React.FC = () => {
 												variant="outline"
 												size="sm"
 												onClick={() => exportToCsv(reconciliationResult.matched, 'matched-transactions.csv')}
-												className="border-green-200 text-green-700 hover:bg-green-100"
+												className="border-green-200 text-green-700 hover:bg-green-100 transition-colors rounded-lg"
 											>
 												<Download className="h-4 w-4 mr-2" />
 												Export CSV
@@ -410,39 +572,44 @@ const ReconciliationTool: React.FC = () => {
 										)}
 									</div>
 								</CardHeader>
-								<CardContent>
+								<CardContent className="p-0">
 									{reconciliationResult.matched.length > 0 ? (
-										<div className="overflow-x-auto">
-											<table className="w-full text-sm">
-												<thead>
-													<tr className="border-b">
-														<th className="text-left py-2">Reference</th>
-														<th className="text-left py-2">Amount</th>
-														<th className="text-left py-2">Status</th>
-														<th className="text-left py-2">Date</th>
-													</tr>
-												</thead>
-												<tbody>
-													{reconciliationResult.matched.slice(0, 10).map((txn, index) => (
-														<tr key={index} className="border-b">
-															<td className="py-2 font-mono text-xs">{txn.transaction_reference}</td>
-															<td className="py-2">{formatCurrency(txn.amount)}</td>
-															<td className="py-2">
-																<span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
-																	{txn.status}
-																</span>
-															</td>
-															<td className="py-2">{txn.date}</td>
+										<>
+											<div className="overflow-x-auto p-4">
+												<table className="w-full text-sm">
+													<thead>
+														<tr className="border-b">
+															<th className="text-left py-2">Reference</th>
+															<th className="text-left py-2">Amount</th>
+															<th className="text-left py-2">Status</th>
+															<th className="text-left py-2">Date</th>
 														</tr>
-													))}
-												</tbody>
-											</table>
-											{reconciliationResult.matched.length > 10 && (
-												<p className="text-xs text-gray-500 mt-2">
-													Showing first 10 of {reconciliationResult.matched.length} transactions
-												</p>
-											)}
-										</div>
+													</thead>
+													<tbody>
+														{getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).data.map((txn, index) => (
+															<tr key={index} className="border-b last:border-b-0">
+																<td className="py-2 font-mono text-xs">{txn.transaction_reference}</td>
+																<td className="py-2">{formatCurrency(txn.amount)}</td>
+																<td className="py-2">
+																	<span className="px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs">
+																		{txn.status}
+																	</span>
+																</td>
+																<td className="py-2">{txn.date}</td>
+															</tr>
+														))}
+													</tbody>
+												</table>
+											</div>
+											<PaginationControls
+												currentPage={getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).currentPage}
+												totalPages={getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).totalPages}
+												onPageChange={(page) => setCurrentPage(prev => ({ ...prev, matched: page }))}
+												totalItems={getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).totalItems}
+												startIndex={getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).startIndex}
+												endIndex={getPaginatedData(reconciliationResult.matched, currentPage.matched, itemsPerPage).endIndex}
+											/>
+										</>
 									) : (
 										<p className="text-gray-500 text-center py-4">No matched transactions found</p>
 									)}
@@ -451,8 +618,8 @@ const ReconciliationTool: React.FC = () => {
 
 							{/* Mismatched Transactions */}
 							{reconciliationResult.mismatched.length > 0 && (
-								<Card>
-									<CardHeader className="bg-orange-50">
+								<Card className="rounded-lg shadow-sm">
+									<CardHeader className="bg-orange-50 rounded-t-lg">
 										<div className="flex justify-between items-center">
 											<CardTitle className="flex items-center space-x-2 text-orange-800">
 												<AlertTriangle className="h-5 w-5" />
@@ -464,57 +631,66 @@ const ReconciliationTool: React.FC = () => {
 												onClick={() => {
 													const flatData = reconciliationResult.mismatched.map(m => ({
 														...m.internal,
+														provider_reference: m.provider.transaction_reference,
+                                                        provider_amount: m.provider.amount,
+                                                        provider_status: m.provider.status,
+                                                        provider_date: m.provider.date,
 														differences: m.differences.join('; ')
 													}));
 													exportToCsv(flatData, 'mismatched-transactions.csv');
 												}}
-												className="border-orange-200 text-orange-700 hover:bg-orange-100"
+												className="border-orange-200 text-orange-700 hover:bg-orange-100 transition-colors rounded-lg"
 											>
 												<Download className="h-4 w-4 mr-2" />
 												Export CSV
 											</Button>
 										</div>
 									</CardHeader>
-									<CardContent>
-										<div className="space-y-4">
-											{reconciliationResult.mismatched.slice(0, 5).map((mismatch, index) => (
+									<CardContent className="p-0">
+										<div className="space-y-4 p-4">
+											{getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).data.map((mismatch, index) => (
 												<div key={index} className="border border-orange-200 rounded-lg p-4 bg-orange-50">
 													<div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 														<div>
-															<h4 className="font-medium text-sm mb-2">Internal System</h4>
-															<p className="text-xs font-mono">{mismatch.internal.transaction_reference}</p>
-															<p className="text-sm">{formatCurrency(mismatch.internal.amount)} • {mismatch.internal.status}</p>
+															<h4 className="font-medium text-sm mb-2 text-gray-800">Internal System</h4>
+															<p className="text-xs font-mono text-gray-700">{mismatch.internal.transaction_reference}</p>
+															<p className="text-sm text-gray-700">{formatCurrency(mismatch.internal.amount)} • {mismatch.internal.status}</p>
+                                                            <p className="text-xs text-gray-700">{mismatch.internal.date}</p>
 														</div>
 														<div>
-															<h4 className="font-medium text-sm mb-2">Provider</h4>
-															<p className="text-xs font-mono">{mismatch.provider.transaction_reference}</p>
-															<p className="text-sm">{formatCurrency(mismatch.provider.amount)} • {mismatch.provider.status}</p>
+															<h4 className="font-medium text-sm mb-2 text-gray-800">Provider</h4>
+															<p className="text-xs font-mono text-gray-700">{mismatch.provider.transaction_reference}</p>
+															<p className="text-sm text-gray-700">{formatCurrency(mismatch.provider.amount)} • {mismatch.provider.status}</p>
+                                                            <p className="text-xs text-gray-700">{mismatch.provider.date}</p>
 														</div>
 													</div>
 													<div className="mt-3 pt-3 border-t border-orange-200">
 														<p className="text-xs font-medium text-orange-800 mb-1">Differences:</p>
-														<ul className="text-xs text-orange-700">
+														<ul className="text-xs text-orange-700 list-disc pl-4">
 															{mismatch.differences.map((diff, i) => (
-																<li key={i}>• {diff}</li>
+																<li key={i}>{diff}</li>
 															))}
 														</ul>
 													</div>
 												</div>
 											))}
-											{reconciliationResult.mismatched.length > 5 && (
-												<p className="text-xs text-gray-500 text-center">
-													Showing first 5 of {reconciliationResult.mismatched.length} mismatched transactions
-												</p>
-											)}
 										</div>
+                                        <PaginationControls
+											currentPage={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).currentPage}
+											totalPages={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).totalPages}
+											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, mismatched: page }))}
+											totalItems={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).totalItems}
+											startIndex={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).startIndex}
+											endIndex={getPaginatedData(reconciliationResult.mismatched, currentPage.mismatched, 5).endIndex}
+										/>
 									</CardContent>
 								</Card>
 							)}
 
 							{/* Internal Only */}
 							{reconciliationResult.internalOnly.length > 0 && (
-								<Card>
-									<CardHeader className="bg-yellow-50">
+								<Card className="rounded-lg shadow-sm">
+									<CardHeader className="bg-yellow-50 rounded-t-lg">
 										<div className="flex justify-between items-center">
 											<CardTitle className="flex items-center space-x-2 text-yellow-800">
 												<AlertTriangle className="h-5 w-5" />
@@ -524,15 +700,15 @@ const ReconciliationTool: React.FC = () => {
 												variant="outline"
 												size="sm"
 												onClick={() => exportToCsv(reconciliationResult.internalOnly, 'internal-only-transactions.csv')}
-												className="border-yellow-200 text-yellow-700 hover:bg-yellow-100"
+												className="border-yellow-200 text-yellow-700 hover:bg-yellow-100 transition-colors rounded-lg"
 											>
 												<Download className="h-4 w-4 mr-2" />
 												Export CSV
 											</Button>
 										</div>
 									</CardHeader>
-									<CardContent>
-										<div className="overflow-x-auto">
+									<CardContent className="p-0">
+										<div className="overflow-x-auto p-4">
 											<table className="w-full text-sm">
 												<thead>
 													<tr className="border-b">
@@ -543,8 +719,8 @@ const ReconciliationTool: React.FC = () => {
 													</tr>
 												</thead>
 												<tbody>
-													{reconciliationResult.internalOnly.slice(0, 10).map((txn, index) => (
-														<tr key={index} className="border-b">
+													{getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).data.map((txn, index) => (
+														<tr key={index} className="border-b last:border-b-0">
 															<td className="py-2 font-mono text-xs">{txn.transaction_reference}</td>
 															<td className="py-2">{formatCurrency(txn.amount)}</td>
 															<td className="py-2">
@@ -557,20 +733,23 @@ const ReconciliationTool: React.FC = () => {
 													))}
 												</tbody>
 											</table>
-											{reconciliationResult.internalOnly.length > 10 && (
-												<p className="text-xs text-gray-500 mt-2">
-													Showing first 10 of {reconciliationResult.internalOnly.length} transactions
-												</p>
-											)}
 										</div>
+                                        <PaginationControls
+											currentPage={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).currentPage}
+											totalPages={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).totalPages}
+											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, internalOnly: page }))}
+											totalItems={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).totalItems}
+											startIndex={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).startIndex}
+											endIndex={getPaginatedData(reconciliationResult.internalOnly, currentPage.internalOnly, itemsPerPage).endIndex}
+										/>
 									</CardContent>
 								</Card>
 							)}
 
 							{/* Provider Only */}
 							{reconciliationResult.providerOnly.length > 0 && (
-								<Card>
-									<CardHeader className="bg-red-50">
+								<Card className="rounded-lg shadow-sm">
+									<CardHeader className="bg-red-50 rounded-t-lg">
 										<div className="flex justify-between items-center">
 											<CardTitle className="flex items-center space-x-2 text-red-800">
 												<X className="h-5 w-5" />
@@ -580,15 +759,15 @@ const ReconciliationTool: React.FC = () => {
 												variant="outline"
 												size="sm"
 												onClick={() => exportToCsv(reconciliationResult.providerOnly, 'provider-only-transactions.csv')}
-												className="border-red-200 text-red-700 hover:bg-red-100"
+												className="border-red-200 text-red-700 hover:bg-red-100 transition-colors rounded-lg"
 											>
 												<Download className="h-4 w-4 mr-2" />
 												Export CSV
 											</Button>
 										</div>
 									</CardHeader>
-									<CardContent>
-										<div className="overflow-x-auto">
+									<CardContent className="p-0">
+										<div className="overflow-x-auto p-4">
 											<table className="w-full text-sm">
 												<thead>
 													<tr className="border-b">
@@ -599,8 +778,8 @@ const ReconciliationTool: React.FC = () => {
 													</tr>
 												</thead>
 												<tbody>
-													{reconciliationResult.providerOnly.slice(0, 10).map((txn, index) => (
-														<tr key={index} className="border-b">
+													{getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).data.map((txn, index) => (
+														<tr key={index} className="border-b last:border-b-0">
 															<td className="py-2 font-mono text-xs">{txn.transaction_reference}</td>
 															<td className="py-2">{formatCurrency(txn.amount)}</td>
 															<td className="py-2">
@@ -613,12 +792,15 @@ const ReconciliationTool: React.FC = () => {
 													))}
 												</tbody>
 											</table>
-											{reconciliationResult.providerOnly.length > 10 && (
-												<p className="text-xs text-gray-500 mt-2">
-													Showing first 10 of {reconciliationResult.providerOnly.length} transactions
-												</p>
-											)}
 										</div>
+                                        <PaginationControls
+											currentPage={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).currentPage}
+											totalPages={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).totalPages}
+											onPageChange={(page) => setCurrentPage(prev => ({ ...prev, providerOnly: page }))}
+											totalItems={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).totalItems}
+											startIndex={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).startIndex}
+											endIndex={getPaginatedData(reconciliationResult.providerOnly, currentPage.providerOnly, itemsPerPage).endIndex}
+										/>
 									</CardContent>
 								</Card>
 							)}
@@ -627,29 +809,29 @@ const ReconciliationTool: React.FC = () => {
 				)}
 
 				{/* Instructions */}
-				<Card className="mt-8">
+				<Card className="mt-8 rounded-lg shadow-sm">
 					<CardHeader>
 						<CardTitle>How to Use</CardTitle>
 					</CardHeader>
 					<CardContent>
 						<div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 							<div>
-								<h4 className="font-medium mb-2">Required CSV Format</h4>
+								<h4 className="font-medium mb-2 text-gray-800">Required CSV Format</h4>
 								<p className="text-sm text-gray-600 mb-2">Both files must contain these columns:</p>
-								<ul className="text-sm text-gray-600 space-y-1">
-									<li>• <code className="bg-gray-100 px-1 rounded">transaction_reference</code> (unique identifier)</li>
-									<li>• <code className="bg-gray-100 px-1 rounded">amount</code> (numeric value)</li>
-									<li>• <code className="bg-gray-100 px-1 rounded">status</code> (transaction status)</li>
-									<li>• <code className="bg-gray-100 px-1 rounded">date</code> (transaction date)</li>
+								<ul className="text-sm text-gray-600 space-y-1 list-disc pl-5">
+									<li><code className="bg-gray-100 px-1 rounded font-mono">transaction_reference</code> (unique identifier)</li>
+									<li><code className="bg-gray-100 px-1 rounded font-mono">amount</code> (numeric value)</li>
+									<li><code className="bg-gray-100 px-1 rounded font-mono">status</code> (transaction status)</li>
+									<li><code className="bg-gray-100 px-1 rounded font-mono">date</code> (transaction date)</li>
 								</ul>
 							</div>
 							<div>
-								<h4 className="font-medium mb-2">Reconciliation Logic</h4>
-								<ul className="text-sm text-gray-600 space-y-1">
-									<li>• Transactions are matched by <code className="bg-gray-100 px-1 rounded">transaction_reference</code></li>
-									<li>• Amount differences {'>'} 0.01 are flagged as mismatched</li>
-									<li>• Status differences are highlighted</li>
-									<li>• Export results for further analysis</li>
+								<h4 className="font-medium mb-2 text-gray-800">Reconciliation Logic</h4>
+								<ul className="text-sm text-gray-600 space-y-1 list-disc pl-5">
+									<li>Transactions are matched by <code className="bg-gray-100 px-1 rounded font-mono">transaction_reference</code></li>
+									<li>Amount differences {'>'} 0.01 are flagged as mismatched</li>
+									<li>Status and Date differences are highlighted</li>
+									<li>Export results for further analysis</li>
 								</ul>
 							</div>
 						</div>
